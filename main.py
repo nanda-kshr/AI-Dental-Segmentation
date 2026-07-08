@@ -1,36 +1,96 @@
-import pyvista as pv
 import numpy as np
-import time
+import pyvista as pv
 
-from geometry.mesh import extract_faces, build_adjacency
-from geometry.normals import compute_face_geometry, compute_vertex_normals
-from geometry.curvature.normal_variation import compute as compute_normal_variation
+from geometry.mesh import (
+    extract_faces,
+    build_adjacency,
+    vertex_degrees,
+    laplacian_smooth,
+)
 
-model = "data/raw/HarithaLakshmi LowerJawScan.stl"
+from geometry.normals import (
+    compute_face_geometry,
+    compute_vertex_normals,
+)
 
-print("Loading mesh...")
-mesh = pv.read(model)
+from geometry.curvature import normal_variation
+
+from geometry.viewer import GeometryViewer
+
+
+# ------------------------------------------------------
+# Load mesh
+# ------------------------------------------------------
+
+mesh = pv.read("data/raw/HarithaLakshmi LowerJawScan.stl")      # <-- your STL
+
 points = mesh.points
+
+print(mesh)
+
+print(f"Vertices : {mesh.n_points}")
+print(f"Triangles: {mesh.n_cells}")
+
+# ------------------------------------------------------
+# Mesh topology
+# ------------------------------------------------------
+
 faces = extract_faces(mesh)
 
-print(f"Mesh loaded: {len(points)} vertices, {len(faces)} faces")
+adj = build_adjacency(
+    faces,
+    mesh.n_points,
+)
 
-print("\nComputing Normals...")
-start = time.time()
-raw_face_normals, unit_face_normals, areas = compute_face_geometry(points, faces)
-vertex_normals = compute_vertex_normals(len(points), faces, raw_face_normals)
-elapsed = time.time() - start
-print(f"✓ Face & Vertex Normals computed in {elapsed:.2f}s")
+degrees = vertex_degrees(
+    adj,
+    mesh.n_points,
+)
 
-print("\nComputing Normal Variation (Curvature)...")
-start = time.time()
-adj = build_adjacency(faces, len(points))
-normal_variation = compute_normal_variation(adj, vertex_normals)
-elapsed = time.time() - start
-print(f"✓ Normal variation computed in {elapsed:.2f}s")
+print()
 
-print(f"\nNormal Variation stats:")
-print(f"  Min:    {normal_variation.min():.6f}")
-print(f"  Max:    {normal_variation.max():.6f}")
-print(f"  Mean:   {normal_variation.mean():.6f}")
-print(f"  Median: {np.median(normal_variation):.6f}")
+print("Adjacency")
+print("-------------------")
+print("Average degree :", np.mean(degrees))
+
+# ------------------------------------------------------
+# Geometry
+# ------------------------------------------------------
+
+raw_face_normals, face_normals, face_areas = compute_face_geometry(
+    points,
+    faces,
+)
+
+vertex_normals = compute_vertex_normals(
+    mesh.n_points,
+    faces,
+    raw_face_normals,
+)
+
+# ------------------------------------------------------
+# Curvature
+# ------------------------------------------------------
+
+raw_curvature = normal_variation.compute(
+    adj,
+    vertex_normals,
+)
+
+# Apply Laplacian smoothing to diffuse the curvature (creating smooth weight paint gradients)
+curvature = laplacian_smooth(raw_curvature, adj, iterations=10)
+
+print()
+
+print("Curvature (Smoothed)")
+print("-------------------")
+print("Min :", curvature.min())
+print("Max :", curvature.max())
+print("Mean:", curvature.mean())
+
+# ------------------------------------------------------
+# Viewer
+# ------------------------------------------------------
+
+viewer = GeometryViewer(mesh)
+viewer.show(curvature, title="Normal Variation")
